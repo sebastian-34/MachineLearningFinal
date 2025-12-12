@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bird Song Classifier — Confusion Matrix</title>
+    <style>
+      :root {
+        --bg: #0b1021;
+        --panel: #121735;
+        --text: #e6e8ff;
+        --muted: #9aa0c7;
+        --accent: #5ac8fa;
+        --good: #34c759;
+        --bad: #ff3b30;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+        background: radial-gradient(1000px 600px at 80% -20%, #1a214d, var(--bg));
+        color: var(--text);
+      }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      .subtitle { color: var(--muted); margin-bottom: 24px; }
+      .container { display: grid; grid-template-columns: 1fr 520px; gap: 24px; }
+      .panel {
+        background: linear-gradient(180deg, #141a3e, var(--panel));
+        border: 1px solid #262b55;
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+      }
+      .matrix-grid {
+        display: grid;
+        grid-template-columns: 160px repeat(2, 1fr);
+        grid-auto-rows: 64px;
+        gap: 8px;
+        align-items: stretch;
+      }
+      .cell, .header {
+        border-radius: 12px;
+        border: 1px solid #2b3264;
+        background: #0f1430;
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+      .header { background: #0e1331; color: var(--muted); font-weight: 600; }
+      .label-cell { justify-content: flex-start; padding-left: 12px; font-weight: 600; color: var(--text); }
+      .value-cell { position: relative; overflow: hidden; }
+      .heat {
+        position: absolute; inset: 0;
+        border-radius: 10px;
+        background: var(--heat-color);
+        opacity: var(--heat-opacity);
+        filter: saturate(1.3);
+      }
+      .value {
+        position: relative; z-index: 1;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .controls { display: grid; gap: 12px; }
+      .control { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+      .control label { color: var(--muted); }
+      input[type="number"] {
+        width: 96px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid #2b3264;
+        background: #0f1430;
+        color: var(--text);
+      }
+      .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        padding: 10px 12px;
+        border: 1px solid #2b3264;
+        background: #10163a;
+        color: var(--text);
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      button.primary { border-color: #3a4bb5; background: #172063; }
+      button:hover { filter: brightness(1.15); }
+      .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+      .metric { background: #0f1430; border: 1px solid #2b3264; border-radius: 12px; padding: 10px; text-align: center; }
+      .metric .label { color: var(--muted); font-size: 12px; }
+      .metric .value { font-size: 18px; }
+      .legend { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12px; }
+      .gradient { height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgba(90,200,250,0.15), rgba(90,200,250,0.55)); border: 1px solid #2b3264; }
+      .note { color: var(--muted); font-size: 12px; margin-top: 12px; }
+      @media (max-width: 980px) { .container { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <h1>Bird Song Classifier — Confusion Matrix</h1>
+    <div class="subtitle">Explore how a model recognizes bird songs: Sparrow, Robin, Blue Jay. Adjust counts to see accuracy, precision, and recall change.</div>
+
+    <div class="container">
+      <div class="panel">
+        <div class="matrix-grid" id="matrix"></div>
+        <div class="legend">
+          <span>Lower</span>
+          <div class="gradient"></div>
+          <span>Higher</span>
+        </div>
+        <div class="metrics" id="metrics"></div>
+        <div class="note">Tip: Diagonal cells are correct predictions; off-diagonals are mistakes. Try different scenarios in the panel on the right.</div>
+      </div>
+
+      <div class="panel">
+        <div class="controls" id="controls"></div>
+        <div class="btns" style="margin-top:12px;">
+          <button class="primary" id="preset-balanced">Balanced Scenario</button>
+          <button id="preset-noisy">Noisy Recording</button>
+          <button id="preset-rare">Rare Robin</button>
+          <button id="randomize">Randomize</button>
+          <button id="reset">Reset</button>
+        </div>
+        <hr style="border:none; border-top:1px solid #2b3264; margin:16px 0;" />
+        <h2 style="margin:0 0 8px; font-size:18px;">Sigmoid Function</h2>
+        <div class="subtitle" style="margin:0 0 12px;">Probability from logit: y = 1/(1 + e^{-k(x - x0)})</div>
+        <canvas id="sigmoidCanvas" width="800" height="420" style="width:100%; height:420px; border:1px solid #3a4bb5; border-radius:12px; background:#0c1233; box-shadow: 0 10px 30px rgba(0,0,0,0.35)"></canvas>
+        <div class="controls" style="margin-top:10px;">
+          <div class="control">
+            <label>Steepness k</label>
+            <input type="range" id="kSlider" min="0.2" max="5" step="0.1" value="1.5" />
+          </div>
+          <div class="control">
+            <label>Center x0</label>
+            <input type="range" id="x0Slider" min="-3" max="3" step="0.1" value="0" />
+          </div>
+          <div class="control">
+            <label>Binary view class</label>
+            <select id="oneVsRestClass">
+              <option value="0">Sparrow vs Robin</option>
+              <option value="1">Robin vs Sparrow</option>
+            </select>
+          </div>
+          <div class="control">
+            <label>Threshold</label>
+            <input type="range" id="thrSlider" min="0.1" max="0.9" step="0.05" value="0.5" />
+          </div>
+          <div style="color:#9aa0c7; font-size:12px;">Scatter points reflect TP/FP/FN/TN counts derived from the confusion matrix for the selected one-vs-rest class.</div>
+        </div>
+
+        <h2 style="margin:16px 0 8px; font-size:18px;">Precision/Recall vs Threshold</h2>
+        <div class="subtitle" style="margin:0 0 12px;">Curves computed from the points on the sigmoid above.</div>
+        <canvas id="prCanvas" width="800" height="240" style="width:100%; height:240px; border:1px solid #3a4bb5; border-radius:12px; background:#0c1233; box-shadow: 0 10px 30px rgba(0,0,0,0.25)"></canvas>
+      </div>
+    </div>
+
+    <script>
+      // Classes for the bird song classifier
+      const classes = ["Sparrow", "Robin"];
+
+      // State: 3x3 matrix of counts
+      let M = [
+        [40, 6],
+        [8, 38],
+      ];
+
+      const matrixEl = document.getElementById("matrix");
+      const controlsEl = document.getElementById("controls");
+      const metricsEl = document.getElementById("metrics");
+
+      // Small helper to build a cell element with text and class
+      function cell(text, className) {
+        const d = document.createElement("div");
+        d.className = className === "header" ? "header" : `cell ${className || ""}`.trim();
+        d.textContent = text;
+        return d;
+      }
+
+      function renderMatrix() {
+        matrixEl.innerHTML = "";
+        // Header row
+        const headerLabel = cell("Predicted →", "header");
+        matrixEl.appendChild(headerLabel);
+        classes.forEach((c) => matrixEl.appendChild(cell(c, "header")));
+
+        // Body rows
+        const maxVal = Math.max(...M.flat());
+        classes.forEach((actual, r) => {
+          matrixEl.appendChild(cell(`Actual: ${actual}`, "label-cell"));
+          classes.forEach((pred, c) => {
+            const val = M[r][c];
+            const heatOpacity = maxVal === 0 ? 0 : 0.15 + 0.4 * (val / maxVal);
+            const heatColor = r === c ? "rgba(52,199,89,0.7)" : "rgba(90,200,250,0.55)";
+            const div = document.createElement("div");
+            div.className = "cell value-cell";
+            const heat = document.createElement("div");
+            heat.className = "heat";
+            heat.style.setProperty("--heat-opacity", heatOpacity);
+            heat.style.setProperty("--heat-color", heatColor);
+            div.appendChild(heat);
+            const valEl = document.createElement("div");
+            valEl.className = "value";
+            valEl.textContent = String(val);
+            div.appendChild(valEl);
+            matrixEl.appendChild(div);
+          });
+        });
+      }
+
+      function renderControls() {
+        controlsEl.innerHTML = "";
+        classes.forEach((actual, r) => {
+          classes.forEach((pred, c) => {
+            const wrap = document.createElement("div");
+            wrap.className = "control";
+            const label = document.createElement("label");
+            label.textContent = `${actual} → ${pred}`;
+            const input = document.createElement("input");
+            input.type = "number";
+            input.min = "0";
+            input.step = "1";
+            input.value = String(M[r][c]);
+            input.addEventListener("input", () => {
+              const v = parseInt(input.value || "0", 10);
+              M[r][c] = Math.max(0, isFinite(v) ? v : 0);
+              update();
+            });
+            wrap.appendChild(label);
+            wrap.appendChild(input);
+            controlsEl.appendChild(wrap);
+          });
+        });
+      }
+
+      function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
+      function diagSum(M) { return M.reduce((acc, row, i) => acc + (row[i] || 0), 0); }
+
+      function computeMetrics() {
+        const total = sum(M.flat());
+        const correct = diagSum(M);
+        const accuracy = total === 0 ? 0 : correct / total;
+
+        const perClass = classes.map((_, i) => {
+          const tp = M[i][i];
+          const fn = sum(M[i]) - tp; // actual i predicted not i
+          const fp = sum(M.map((row) => row[i])) - tp; // predicted i but actual not i
+          const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+          const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+          const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+          return { precision, recall, f1 };
+        });
+
+        return { accuracy, perClass };
+      }
+
+      function pct(x) { return (x * 100).toFixed(1) + "%"; }
+
+      function renderMetrics() {
+        const { accuracy, perClass } = computeMetrics();
+        metricsEl.innerHTML = "";
+        const makeMetric = (label, value, good) => {
+          const m = document.createElement("div");
+          m.className = "metric";
+          const l = document.createElement("div");
+          l.className = "label";
+          l.textContent = label;
+          const v = document.createElement("div");
+          v.className = "value";
+          v.textContent = value;
+          v.style.color = good ? "var(--good)" : "var(--text)";
+          m.appendChild(l); m.appendChild(v);
+          metricsEl.appendChild(m);
+        };
+        makeMetric("Accuracy", pct(accuracy), true);
+        perClass.forEach((m, i) => {
+          makeMetric(`${classes[i]} Precision`, pct(m.precision), m.precision >= 0.7);
+          makeMetric(`${classes[i]} Recall`, pct(m.recall), m.recall >= 0.7);
+          makeMetric(`${classes[i]} F1`, pct(m.f1), m.f1 >= 0.7);
+        });
+      }
+
+      function update() {
+        renderMatrix();
+        renderMetrics();
+        // Refresh numbers in controls to keep in sync
+        renderControls();
+      }
+
+      // Presets
+      function applyPresetBalanced() {
+        M = [
+          [35, 5],
+          [5, 35],
+        ];
+        update();
+      }
+      function applyPresetNoisy() {
+        // More confusion across classes due to noisy audio
+        M = [
+          [22, 18],
+          [17, 23],
+        ];
+        update();
+      }
+      function applyPresetRareBlueJay() {
+        // Two-bird case: Robin underrepresented
+        M = [
+          [40, 8],
+          [10, 24],
+        ];
+        update();
+      }
+      function randomize() {
+        M = Array.from({ length: 2 }, () =>
+          Array.from({ length: 2 }, () => Math.floor(Math.random() * 41))
+        );
+        update();
+      }
+      function reset() {
+        M = [
+          [40, 6],
+          [8, 38],
+        ];
+        update();
+      }
+
+      document.getElementById("preset-balanced").addEventListener("click", applyPresetBalanced);
+      document.getElementById("preset-noisy").addEventListener("click", applyPresetNoisy);
+      document.getElementById("preset-rare").addEventListener("click", applyPresetRareBlueJay);
+      document.getElementById("randomize").addEventListener("click", randomize);
+      document.getElementById("reset").addEventListener("click", reset);
+
+      // Initial render
+      update();
+
+      // Sigmoid graph
+      const canvas = document.getElementById("sigmoidCanvas");
+      const ctx = canvas.getContext("2d");
+      const prCanvas = document.getElementById("prCanvas");
+      const prCtx = prCanvas.getContext("2d");
+      const kSlider = document.getElementById("kSlider");
+      const x0Slider = document.getElementById("x0Slider");
+      const clsSelect = document.getElementById("oneVsRestClass");
+      const thrSlider = document.getElementById("thrSlider");
+
+      function sigmoid(x, k, x0) { return 1 / (1 + Math.exp(-k * (x - x0))); }
+
+      // cache of latest point probabilities
+      let latestPosYs = [];
+      let latestNegYs = [];
+
+      function drawSigmoid() {
+        const k = parseFloat(kSlider.value);
+        const x0 = parseFloat(x0Slider.value);
+        const cls = parseInt(clsSelect.value, 10);
+        const thr = parseFloat(thrSlider.value);
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // axes
+        ctx.strokeStyle = "#3a4bb5";
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+        ctx.moveTo(0, h-20); ctx.lineTo(w, h-20); // x-axis
+        ctx.moveTo(40, 0); ctx.lineTo(40, h); // y-axis
+        ctx.stroke();
+
+        // axis labels: x = feature, y = sigmoid(feature)
+        ctx.fillStyle = "#9aa0c7";
+        ctx.font = "12px system-ui";
+        ctx.fillText("feature x", w-100, h-24);
+        ctx.fillText("sigmoid(x)", 6, 14);
+
+        // map x in [-6, 6] to canvas
+        const xMin = -6, xMax = 6;
+        const toX = (x) => 40 + (x - xMin) / (xMax - xMin) * (w - 60);
+        const toY = (y) => (h - 20) - y * (h - 40);
+
+        // grid
+        ctx.strokeStyle = "#182052";
+        ctx.lineWidth = 1;
+        for (let gx = -6; gx <= 6; gx += 2) {
+          const cx = toX(gx);
+          ctx.beginPath(); ctx.moveTo(cx, 20); ctx.lineTo(cx, h-20); ctx.stroke();
+        }
+        for (let gy = 0; gy <= 1.0; gy += 0.25) {
+          const cy = toY(gy);
+          ctx.beginPath(); ctx.moveTo(40, cy); ctx.lineTo(w-20, cy); ctx.stroke();
+        }
+
+        // curve (with glow)
+        ctx.strokeStyle = "#5ac8fa";
+        ctx.lineWidth = 3;
+        ctx.shadowColor = "rgba(90,200,250,0.6)";
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        for (let i = 0; i <= 600; i++) {
+          const x = xMin + (i / 600) * (xMax - xMin);
+          const y = sigmoid(x, k, x0);
+          const cx = toX(x), cy = toY(y);
+          if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // threshold marker at y=0.5
+        ctx.strokeStyle = "#34c759";
+        ctx.setLineDash([4,3]);
+        const y05 = toY(0.5);
+        ctx.beginPath(); ctx.moveTo(40, y05); ctx.lineTo(w-20, y05); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Center x0 marker
+        const x0c = toX(x0);
+        ctx.strokeStyle = "#ff9f0a";
+        ctx.beginPath(); ctx.moveTo(x0c, 20); ctx.lineTo(x0c, h-20); ctx.stroke();
+
+        // overlay points representing confusion matrix for selected class
+        // Compute TP, FP, FN, TN for selected class
+        const tp = M[cls][cls];
+        const fn = sum(M[cls]) - tp;
+        const fp = sum(M.map(row => row[cls])) - tp;
+        const total = sum(M.flat());
+        const tn = total - tp - fn - fp;
+
+        // Utility: sample x values from normal distributions
+        function randn() { // Box-Muller
+          let u = 0, v = 0;
+          while (u === 0) u = Math.random();
+          while (v === 0) v = Math.random();
+          return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+        function sampleX(mean, std) { return mean + randn() * std; }
+
+        // Ensure counts match exactly: generate above/below-threshold points deterministically
+        function genPoints(nAbove, nBelow, mean, std, k, x0, thr, biasDir) {
+          const pts = [];
+          // biasDir: +1 nudges x to increase y, -1 to decrease y
+          for (let i = 0; i < nAbove; i++) {
+            let x = sampleX(mean, std);
+            let y = sigmoid(x, k, x0);
+            // Nudge until above threshold
+            let guard = 0;
+            while (y < thr && guard++ < 20) { x += 0.3 * biasDir; y = sigmoid(x, k, x0); }
+            pts.push({ x, y });
+          }
+          for (let i = 0; i < nBelow; i++) {
+            let x = sampleX(mean, std);
+            let y = sigmoid(x, k, x0);
+            // Nudge until below threshold
+            let guard = 0;
+            while (y >= thr && guard++ < 20) { x -= 0.3 * biasDir; y = sigmoid(x, k, x0); }
+            pts.push({ x, y });
+          }
+          return pts;
+        }
+
+        // Positives (actual class): center near x0+1
+        const posPts = genPoints(tp, fn, x0 + 1.0, 0.9, k, x0, thr, +1);
+        // Negatives (other class): center near x0-1
+        const negPts = genPoints(fp, tn, x0 - 1.0, 0.9, k, x0, thr, -1);
+
+        latestPosYs = posPts.map(p => p.y);
+        latestNegYs = negPts.map(p => p.y);
+
+        // Draw points: TP/FN in orange hues, FP/TN in blue hues
+        function drawPts(pts, colorAbove, colorBelow) {
+          for (const p of pts) {
+            const cx = toX(Math.max(-6, Math.min(6, p.x)));
+            const cy = toY(p.y);
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+            const fill = (p.y >= thr) ? colorAbove : colorBelow;
+            ctx.fillStyle = fill;
+            ctx.strokeStyle = "#0b1021";
+            ctx.lineWidth = 1;
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
+        // Positives: above thr -> TP, below -> FN
+        drawPts(posPts, "#ffd66b", "#ff7f50");
+        // Negatives: above thr -> FP, below -> TN
+        drawPts(negPts, "#78caff", "#6aa0ff");
+
+        // legend + counts
+        ctx.fillStyle = "#e6e8ff";
+        ctx.font = "13px system-ui";
+        ctx.fillText(`k=${k.toFixed(2)}  x0=${x0.toFixed(2)}  thr=${thr.toFixed(2)}`, w-260, 18);
+        ctx.fillStyle = "#ffd66b"; ctx.fillText(`TP ${tp}`, 60, h-6);
+        ctx.fillStyle = "#ff7f50"; ctx.fillText(`FN ${fn}`, 130, h-6);
+        ctx.fillStyle = "#78caff"; ctx.fillText(`FP ${fp}`, 200, h-6);
+        ctx.fillStyle = "#6aa0ff"; ctx.fillText(`TN ${tn}`, 270, h-6);
+      }
+
+      function drawPR() {
+        // Using latest cached y values, sweep thresholds in [0.05, 0.95]
+        const w = prCanvas.width, h = prCanvas.height;
+        prCtx.clearRect(0, 0, w, h);
+
+        // axes
+        prCtx.strokeStyle = "#3a4bb5";
+        prCtx.lineWidth = 1.25;
+        prCtx.beginPath();
+        prCtx.moveTo(40, h-30); prCtx.lineTo(w-20, h-30); // x-axis (threshold)
+        prCtx.moveTo(40, 10); prCtx.lineTo(40, h-30); // y-axis (value)
+        prCtx.stroke();
+
+        prCtx.fillStyle = "#9aa0c7";
+        prCtx.font = "12px system-ui";
+        prCtx.fillText("threshold", w-100, h-34);
+        prCtx.fillText("value", 6, 18);
+
+        const toX = (t) => 40 + (t - 0.05) / (0.95 - 0.05) * (w - 60);
+        const toY = (v) => (h - 30) - v * (h - 50);
+
+        // grid
+        prCtx.strokeStyle = "#182052";
+        prCtx.lineWidth = 1;
+        for (let t = 0.1; t <= 0.9; t += 0.2) {
+          const cx = toX(t);
+          prCtx.beginPath(); prCtx.moveTo(cx, 10); prCtx.lineTo(cx, h-30); prCtx.stroke();
+          prCtx.fillStyle = "#9aa0c7"; prCtx.fillText(t.toFixed(1), cx-12, h-12);
+        }
+        for (let v = 0; v <= 1.0; v += 0.25) {
+          const cy = toY(v);
+          prCtx.beginPath(); prCtx.moveTo(40, cy); prCtx.lineTo(w-20, cy); prCtx.stroke();
+          prCtx.fillStyle = "#9aa0c7"; prCtx.fillText(v.toFixed(2), 6, cy-4);
+        }
+
+        // compute precision/recall across thresholds
+        const thresholds = 60;
+        const ptsPrec = [];
+        const ptsRec = [];
+        for (let i = 0; i <= thresholds; i++) {
+          const thr = 0.05 + (i / thresholds) * (0.95 - 0.05);
+          const tp = latestPosYs.filter(y => y >= thr).length;
+          const fn = latestPosYs.length - tp;
+          const fp = latestNegYs.filter(y => y >= thr).length;
+          const precision = (tp + fp) === 0 ? 0 : tp / (tp + fp);
+          const recall = (tp + fn) === 0 ? 0 : tp / (tp + fn);
+          ptsPrec.push({ x: toX(thr), y: toY(precision) });
+          ptsRec.push({ x: toX(thr), y: toY(recall) });
+        }
+
+        // draw curves
+        prCtx.shadowColor = "rgba(90,200,250,0.6)";
+        prCtx.shadowBlur = 6;
+        prCtx.strokeStyle = "#5ac8fa"; // precision
+        prCtx.lineWidth = 2.5;
+        prCtx.beginPath();
+        ptsPrec.forEach((p, idx) => { if (idx === 0) prCtx.moveTo(p.x, p.y); else prCtx.lineTo(p.x, p.y); });
+        prCtx.stroke();
+        prCtx.shadowBlur = 0;
+
+        prCtx.strokeStyle = "#ff9f0a"; // recall
+        prCtx.lineWidth = 2.5;
+        prCtx.beginPath();
+        ptsRec.forEach((p, idx) => { if (idx === 0) prCtx.moveTo(p.x, p.y); else prCtx.lineTo(p.x, p.y); });
+        prCtx.stroke();
+
+        // current threshold marker
+        const currentThr = parseFloat(thrSlider.value);
+        const cx = toX(currentThr);
+        prCtx.strokeStyle = "#34c759";
+        prCtx.setLineDash([4,3]);
+        prCtx.beginPath(); prCtx.moveTo(cx, 10); prCtx.lineTo(cx, h-30); prCtx.stroke();
+        prCtx.setLineDash([]);
+
+        // legend
+        prCtx.fillStyle = "#e6e8ff";
+        prCtx.font = "12px system-ui";
+        prCtx.fillText("precision (blue)", w-150, 20);
+        prCtx.fillStyle = "#ff9f0a";
+        prCtx.fillText("recall (orange)", w-150, 36);
+      }
+
+      function redrawAll() { drawSigmoid(); drawPR(); }
+
+      kSlider.addEventListener("input", redrawAll);
+      x0Slider.addEventListener("input", redrawAll);
+      clsSelect.addEventListener("change", redrawAll);
+      thrSlider.addEventListener("input", () => { drawSigmoid(); drawPR(); });
+      redrawAll();
+    </script>
+  </body>
+</html>
